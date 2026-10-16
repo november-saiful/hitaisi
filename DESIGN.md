@@ -3,14 +3,14 @@
 Subject: a free benevolent commons. Audience: learners, sharers, volunteers.
 Job of the homepage: show what was freely given this week, and where to give.
 
-## Palette (R-01, R-29: 2 cores + 1 accent)
-- `paper` #FBFAF7 — page base (light default; content-first product)
-- `ink` #16130E — text
-- `moss` #1B5E3B — the ONE accent. Used only at the key moment:
+## Palette — strict monochrome, nothing else (R-01, R-29)
+- `paper` #FAFAF8 — page base (light default; content-first product)
+- `ink` #111110 — text
+- `accent` #111110 — the ONE accent, pure black. Used only at the key moment:
   primary publish/download CTA + active hub marker. Nowhere else.
-- Supporting neutrals: `clay` #E9E2D5 (hairline/fill), `stone` #6B645A (secondary text)
-- Dark theme: `night` #12100C base, `parchment` #EDE8DB text, same moss accent lightened.
-- No blue-purple gradients, no rainbow, no neon, no radial orbs (R-01).
+- Supporting neutrals: `clay` #E4E1DA (hairline/fill), `stone` #6E6A62 (secondary text)
+- Dark theme: `paper` #101010 base, `ink` #F2F0EA text, `accent` #F2F0EA (white).
+- No hue anywhere: no green, no blue-purple gradients, no rainbow, no neon, no radial orbs (R-01).
 
 ## Type (R-06)
 - Display: Fraunces (serif, high contrast) — homepage thesis + knowledge headlines only.
@@ -38,7 +38,7 @@ Job of the homepage: show what was freely given this week, and where to give.
 - No endless pulse/float/spin (R-19). `prefers-reduced-motion` disables all.
 
 ## Signature: the Giving Ribbon
-One continuous 2px moss thread runs down the left of each hub timeline —
+One continuous 2px black thread runs down the left of each hub timeline —
 chapter marks (Knowledge), version ticks (Software), type ledger (Files),
 request steps (Services), live RSVP dots — real state only (R-31).
 This is the one memorable element; everything around it stays quiet.
