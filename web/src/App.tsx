@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { NavLink, Route, Routes, useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { NavLink, Route, Routes, useParams, Link, useNavigate, useSearchParams, useLocation } from "react-router-dom";
 
 type Item = Record<string, string | number | null>;
 type User = { id: string; email: string; display_name: string; role: string };
@@ -43,6 +43,24 @@ function useMe() {
   return { user, loading, refresh };
 }
 
+function usePager<T>(items: T[], perPage = 8) {
+  const [page, setPage] = useState(1);
+  const pages = Math.max(1, Math.ceil(items.length / perPage));
+  const cur = Math.min(page, pages);
+  const slice = items.slice((cur - 1) * perPage, cur * perPage);
+  useEffect(() => { setPage(1); }, [items.length]);
+  return { slice, cur, pages, setPage, total: items.length };
+}
+
+function fmtDate(ts: unknown): string {
+  const n = Number(ts);
+  if (!n) return "—";
+  const ms = n < 1e12 ? n * 1000 : n;
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime()) || d.getFullYear() < 2000 || d.getFullYear() > 2100) return "—";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
 // ---- Turnstile (renders only when a site key is configured) ----
 interface TurnstileApi {
   render(el: HTMLElement, opts: { sitekey: string; callback: (t: string) => void }): string;
@@ -80,7 +98,7 @@ function Turnstile({ onToken }: { onToken: (t: string) => void }) {
       if (live && ref.current && window.turnstile) {
         window.turnstile.render(ref.current, { sitekey: key, callback: onToken });
       }
-    }).catch(() => { /* bot check unavailable — server still validates when configured */ });
+    }).catch(() => { /* server still validates when configured */ });
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
@@ -94,45 +112,160 @@ function SignInGate({ user, loading, children }: { user: User | null; loading: b
   return <>{children}</>;
 }
 
+// ---- Dashboard frame ----
+const NAV_COMMONS = [
+  { to: "/", label: "Dashboard", end: true },
+  { to: "/knowledge", label: "Knowledge" },
+  { to: "/software", label: "Software" },
+  { to: "/files", label: "Files" },
+  { to: "/services", label: "Services" },
+  { to: "/social", label: "Gatherings" },
+];
+
+function Sidebar({ me, open, close }: { me: ReturnType<typeof useMe>; open: boolean; close: () => void }) {
+  const isMod = !!me.user && (me.user.role === "admin" || me.user.role === "moderator");
+  const { data: queue } = useApi<{ pending: Record<string, Item[]> }>(isMod ? "/api/moderate/pending" : null);
+  const pendingCount = useMemo(() => Object.values(queue?.pending ?? {}).reduce((n, v) => n + v.length, 0), [queue]);
+  const { data: recent } = useApi<{ items: Item[] }>("/api/knowledge");
+  return (
+    <aside className={`sidebar${open ? " open" : ""}`} aria-label="Primary">
+      <div className="side-scroll">
+        <div className="brand-row">
+          <Link className="brand" to="/" onClick={close}><span className="brand-mark">H</span><strong>Hitaisi</strong></Link>
+          <button className="iconbtn drawer-close" onClick={close} aria-label="Close menu">✕</button>
+        </div>
+        <div className="side-label">Commons</div>
+        <nav>
+          {NAV_COMMONS.map((n) => (
+            <NavLink key={n.to} to={n.to} end={n.end} onClick={close} className={({ isActive }) => `side-item${isActive ? " active" : ""}`}>
+              <span className="grow">{n.label}</span>
+            </NavLink>
+          ))}
+        </nav>
+        <div className="side-label">Workspace</div>
+        <nav>
+          <NavLink to="/moderate" onClick={close} className={({ isActive }) => `side-item${isActive ? " active" : ""}`}>
+            <span className="grow">Review Queue</span>
+            {isMod && pendingCount > 0 && <span className="badge">{pendingCount}</span>}
+          </NavLink>
+          <NavLink to="/submit" onClick={close} className={({ isActive }) => `side-item${isActive ? " active" : ""}`}>
+            <span className="grow">Share something</span>
+          </NavLink>
+        </nav>
+        <div className="side-label">Latest guides</div>
+        <nav>
+          {(recent?.items ?? []).slice(0, 4).map((g) => (
+            <Link key={String(g.id)} className="run-row" to={`/knowledge/${g.slug}`} onClick={close}>
+              <span className="run-dot live" /><span className="grow" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(g.title)}</span>
+            </Link>
+          ))}
+          {(!recent?.items?.length) && <span className="run-row muted">No guides yet.</span>}
+        </nav>
+        <div className="usage">
+          <div><strong>Free forever.</strong></div>
+          <div className="muted" style={{ fontSize: 13 }}>Everything here is shared, not sold.</div>
+          <div style={{ marginTop: 10 }}><Link className="btn btn-sm" to="/submit" onClick={close}>Share something</Link></div>
+        </div>
+      </div>
+      {me.user ? (
+        <Link className="profile" to="/signin" onClick={close}>
+          <span className="avatar">{me.user.display_name.slice(0, 1).toUpperCase()}</span>
+          <span style={{ minWidth: 0 }}><strong style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{me.user.display_name}</strong><span className="muted" style={{ fontSize: 12 }}>{me.user.email}</span></span>
+        </Link>
+      ) : (
+        <Link className="profile" to="/signin" onClick={close}>
+          <span className="avatar">?</span>
+          <span><strong>Sign in</strong><br /><span className="muted" style={{ fontSize: 12 }}>to share &amp; moderate</span></span>
+        </Link>
+      )}
+    </aside>
+  );
+}
+
+const CRUMBS: Record<string, string> = {
+  "/": "Dashboard", "/knowledge": "Knowledge", "/software": "Software", "/files": "Files",
+  "/services": "Services", "/social": "Gatherings", "/moderate": "Review Queue",
+  "/submit": "Share", "/signin": "Sign in", "/search": "Search",
+};
+
 function Shell({ me, children }: { me: ReturnType<typeof useMe>; children: ReactNode }) {
   const [theme, setTheme] = useState("light");
+  const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const navigate = useNavigate();
+  const loc = useLocation();
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+  useEffect(() => { setOpen(false); }, [loc.pathname]);
+  const base = "/" + loc.pathname.split("/")[1];
+  const crumb = CRUMBS[base] ?? "Hitaisi";
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
     me.refresh();
     navigate("/");
   }
   return (
-    <div className="wrap">
-      <header className="topbar">
-        <Link className="brand" to="/"><span className="brand-mark">H</span><strong>Hitaisi</strong></Link>
-        <nav className="nav" aria-label="Hubs">
-          <NavLink to="/knowledge">Knowledge</NavLink>
-          <NavLink to="/software">Software</NavLink>
-          <NavLink to="/files">Files</NavLink>
-          <NavLink to="/services">Services</NavLink>
-          <NavLink to="/social">Social</NavLink>
-        </nav>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <form onSubmit={(e) => { e.preventDefault(); if (q.trim()) navigate(`/search?q=${encodeURIComponent(q.trim())}`); }} role="search">
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search the commons" aria-label="Search" style={{ width: 180 }} />
-          </form>
-          {me.user ? (
-            <><span className="muted">{me.user.display_name}</span><button className="btn" onClick={() => void logout()}>Out</button></>
-          ) : (
-            <Link className="btn" to="/signin">Sign in</Link>
-          )}
-          <button className="btn" onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))} aria-label="Toggle theme">
-            {theme === "light" ? "Dark" : "Light"}
-          </button>
-        </div>
-      </header>
-      <main>{children}</main>
-      <footer className="muted" style={{ padding: "48px 0" }}>
-        Free forever. Everything here is shared, not sold. <Link to="/submit">Share something</Link> — a moderator reviews it first.
-      </footer>
+    <div className="app">
+      <div className={`side-overlay${open ? " show" : ""}`} onClick={() => setOpen(false)} />
+      <Sidebar me={me} open={open} close={() => setOpen(false)} />
+      <div className="main">
+        <header className="topbar">
+          <button className="iconbtn hamb" onClick={() => setOpen(true)} aria-label="Open menu">☰</button>
+          <div className="crumbs"><span className="muted crumb-parent">Hitaisi</span><span className="muted crumb-parent">›</span><span>{crumb}</span></div>
+          <div className="top-actions">
+            <form className="searchbox" role="search" onSubmit={(e) => { e.preventDefault(); if (q.trim()) navigate(`/search?q=${encodeURIComponent(q.trim())}`); }}>
+              <span aria-hidden>⌕</span>
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search the commons" aria-label="Search" />
+              <kbd>↵</kbd>
+            </form>
+            <button className="iconbtn" onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))} aria-label="Toggle theme">{theme === "light" ? "◐" : "◑"}</button>
+            {me.user ? <button className="btn btn-sm" onClick={() => void logout()}><span className="btn-text">Sign out</span><span>↩</span></button>
+              : <Link className="btn btn-sm btn-primary" to="/signin"><span className="btn-text">Sign in</span><span>→</span></Link>}
+          </div>
+        </header>
+        <main className="page">{children}</main>
+      </div>
+    </div>
+  );
+}
+
+// ---- Pages ----
+function Stat({ label, value, loading }: { label: string; value: string; loading?: boolean }) {
+  return <div className="stat"><small>{label}</small><div className="num">{loading ? "…" : value}</div></div>;
+}
+
+function Dashboard() {
+  const k = useApi<{ items: Item[] }>("/api/knowledge");
+  const s = useApi<{ items: Item[] }>("/api/software");
+  const f = useApi<{ items: Item[] }>("/api/files");
+  const e = useApi<{ items: Item[] }>("/api/events");
+  const guides = k.data?.items ?? [];
+  const events = useMemo(() => [...(e.data?.items ?? [])].sort((a, b) => Number(a.starts_at) - Number(b.starts_at)), [e.data]);
+  return (
+    <div className="reveal">
+      <div className="page-head">
+        <div><h1 className="display">What was freely given.</h1><p>Guides, software, files, help and gatherings — read everything, share after review.</p></div>
+        <div className="head-actions"><Link className="btn" to="/social">Join a gathering</Link><Link className="btn btn-primary" to="/submit">Share something</Link></div>
+      </div>
+      <div className="stat-grid">
+        <Stat label="Guides live" value={String(guides.length)} loading={k.loading} />
+        <Stat label="Software entries" value={String(s.data?.items.length ?? 0)} loading={s.loading} />
+        <Stat label="Files in library" value={String(f.data?.items.length ?? 0)} loading={f.loading} />
+        <Stat label="Gatherings upcoming" value={String(events.length)} loading={e.loading} />
+      </div>
+      <div className="sec-head"><h2>Latest guides</h2><Link className="linkbtn" to="/knowledge">View all</Link></div>
+      <div className="table-wrap"><table className="tbl"><thead><tr><th>Guide</th><th>Read</th><th>Published</th><th>Status</th></tr></thead><tbody>
+        {guides.slice(0, 6).map((g) => (
+          <tr key={String(g.id)}><td><Link to={`/knowledge/${g.slug}`}><strong>{String(g.title)}</strong></Link><div className="muted" style={{ fontSize: 13 }}>{String(g.summary ?? "").slice(0, 90)}</div></td><td>{String(g.read_minutes ?? "—")} min</td><td>{fmtDate(g.created_at)}</td><td><span className="pill p-active">Live</span></td></tr>
+        ))}
+        {!k.loading && !guides.length && <tr><td colSpan={4} className="muted">No guides yet — <Link to="/submit">write the first one</Link>.</td></tr>}
+      </tbody></table></div>
+      <div className="sec-head"><h2>Upcoming gatherings</h2><Link className="linkbtn" to="/social">View all</Link></div>
+      <div className="table-wrap"><table className="tbl"><thead><tr><th>Gathering</th><th>Place</th><th>Date</th><th>Status</th></tr></thead><tbody>
+        {events.slice(0, 6).map((v) => (
+          <tr key={String(v.id)}><td><strong>{String(v.title)}</strong></td><td>{String(v.place)}</td><td>{fmtDate(v.starts_at)}</td><td><span className="pill p-pending">Open</span></td></tr>
+        ))}
+        {!e.loading && !events.length && <tr><td colSpan={4} className="muted">Nothing scheduled — propose one from Gatherings.</td></tr>}
+      </tbody></table></div>
     </div>
   );
 }
@@ -147,43 +280,22 @@ function SignIn({ me }: { me: ReturnType<typeof useMe> }) {
     setMsg(String(data.message ?? data.error ?? ""));
     setDevLink(String(data.devLink ?? ""));
   }
-  if (me.user) return <div className="notice"><strong>Signed in as {me.user.display_name}.</strong><p><Link to="/submit">Share something</Link>, or browse the hubs.</p></div>;
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    me.refresh();
+  }
+  if (me.user) return <div className="page-head"><div><h1 className="display">Signed in as {me.user.display_name}.</h1><p>{me.user.email} · {me.user.role}</p></div><div className="head-actions"><button className="btn" onClick={() => void logout()}>Sign out</button><Link className="btn btn-primary" to="/submit">Share something</Link></div></div>;
   return (
-    <div className="reveal" style={{ maxWidth: 480 }}>
-      <h1 className="display">Sign in with email.</h1>
-      <p className="lede">No passwords. We send a 15-minute link.</p>
-      {msg && <p role="status">{msg}</p>}
-      {devLink && <p><Link to={devLink.replace(/^https?:\/\/[^/]+/, "")}>Use this sign-in link (dev only)</Link></p>}
-      <form onSubmit={(e) => void send(e)}>
-        <label>Email<input name="email" type="email" placeholder="you@example.com" required /></label>
-        <button className="btn btn-primary" type="submit">Send the link</button>
-      </form>
-    </div>
-  );
-}
-
-function Home() {
-  return (
-    <div className="reveal">
-      <section className="hero">
-        <h1 className="display">What was freely given this week.</h1>
-        <p className="lede">Guides to read, software to download, files to reuse, neighbours offering help, and gatherings to join. No accounts needed to read — sign in only to share.</p>
-        <div className="cta-row">
-          <Link className="btn btn-primary" to="/knowledge">Read the guides <span className="dot">→</span></Link>
-          <Link className="btn" to="/submit">Share something</Link>
-        </div>
-      </section>
-      <section className="grid-hubs">
-        {[
-          ["/knowledge", "Knowledge", "Longform guides with chapters and sources."],
-          ["/software", "Software", "Versioned downloads with checksums."],
-          ["/files", "Files", "A ledger of reusable documents and data."],
-          ["/services", "Services", "Free help: ask, match, confirm."],
-          ["/social", "Social", "Volunteer feed and live gatherings."],
-        ].map(([to, title, desc]) => (
-          <Link key={to} className="hub-card" to={to}><small>{title}</small><h3 style={{ margin: "8px 0" }}>{title}</h3><p className="muted">{desc}</p></Link>
-        ))}
-      </section>
+    <div className="reveal" style={{ maxWidth: 520 }}>
+      <div className="page-head"><div><h1 className="display">Sign in with email.</h1><p>No passwords. We send a 15-minute link.</p></div></div>
+      <div className="card">
+        {msg && <p role="status">{msg}</p>}
+        {devLink && <p><Link to={devLink.replace(/^https?:\/\/[^/]+/, "")}>Use this sign-in link (dev only)</Link></p>}
+        <form onSubmit={(e) => void send(e)}>
+          <div className="field"><label htmlFor="si-email">Email</label><input id="si-email" name="email" type="email" placeholder="you@example.com" required /></div>
+          <div style={{ marginTop: 12 }}><button className="btn btn-primary" type="submit">Send the link</button></div>
+        </form>
+      </div>
     </div>
   );
 }
@@ -195,25 +307,46 @@ function SearchPage() {
   const hubPath = (hub: unknown, ref: unknown) => hub === "knowledge" ? `/knowledge/${ref}` : hub === "software" ? "/software" : hub === "files" ? "/files" : hub === "services" ? "/services" : "/";
   return (
     <div className="reveal">
-      <h1 className="display">Results for “{q}”.</h1>
+      <div className="page-head"><div><h1 className="display">Results for “{q}”.</h1><p>{data ? `${data.items.length} matches across the commons.` : ""}</p></div></div>
       {loading && <p className="muted">Searching…</p>}
       {error && <div className="notice">Search failed ({error}).</div>}
       {data && !data.items.length && <div className="notice"><strong>Nothing found.</strong><p>Try fewer words, or be the first to share it.</p></div>}
-      {data?.items.map((it, i) => (
-        <div key={i} className="list-row"><div><small className="muted">{String(it.hub)}</small><br /><Link to={hubPath(it.hub, it.ref)}><strong>{String(it.title)}</strong></Link><div className="muted">{String(it.summary ?? "")}</div></div></div>
-      ))}
+      {!!data?.items.length && (
+        <div className="table-wrap"><table className="tbl"><thead><tr><th>Result</th><th>Hub</th></tr></thead><tbody>
+          {data.items.map((it, i) => (
+            <tr key={i}><td><Link to={hubPath(it.hub, it.ref)}><strong>{String(it.title)}</strong></Link><div className="muted" style={{ fontSize: 13 }}>{String(it.summary ?? "")}</div></td><td><span className="pill p-pending">{String(it.hub)}</span></td></tr>
+          ))}
+        </tbody></table></div>
+      )}
     </div>
   );
 }
 
 function KnowledgeList() {
   const { data, error, loading } = useApi<{ items: Item[] }>("/api/knowledge");
-  if (loading) return <p className="muted">Loading guides…</p>;
-  if (error) return <div className="notice">Guides failed to load ({error}). Try again shortly.</div>;
-  if (!data?.items.length) return <div className="notice"><strong>No guides yet.</strong><p>Be the first to share one — it goes live after a quick review.</p><Link className="btn btn-primary" to="/submit">Write a guide</Link></div>;
-  return <div className="ribbon">{data.items.map((k) => (
-    <article key={String(k.id)} className="list-row"><div><Link to={`/knowledge/${k.slug}`}><strong>{k.title}</strong></Link><div className="muted">{k.summary} · {k.read_minutes} min</div></div></article>
-  ))}</div>;
+  const [fq, setFq] = useState("");
+  const items = (data?.items ?? []).filter((g) => !fq || String(g.title).toLowerCase().includes(fq.toLowerCase()));
+  const pg = usePager(items);
+  return (
+    <div className="reveal">
+      <div className="page-head"><div><h1 className="display">Knowledge.</h1><p>Longform guides, free to read and reuse with credit.</p></div><div className="head-actions"><Link className="btn btn-primary" to="/submit">Write a guide</Link></div></div>
+      <div className="stat-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+        <Stat label="Guides live" value={String(data?.items.length ?? 0)} loading={loading} />
+        <Stat label="Total reading time" value={`${(data?.items ?? []).reduce((n, g) => n + Number(g.read_minutes ?? 0), 0)} min`} loading={loading} />
+      </div>
+      <div className="filters"><input type="search" placeholder="Search guides…" value={fq} onChange={(e) => setFq(e.target.value)} aria-label="Search guides" /></div>
+      {error && <div className="notice">Guides failed to load ({error}).</div>}
+      {!loading && !items.length && <div className="notice"><strong>{fq ? "No guides match that search." : "No guides yet."}</strong><p>Be the first to share one — it goes live after a quick review.</p></div>}
+      {!!items.length && (
+        <div className="table-wrap"><table className="tbl"><thead><tr><th>Guide</th><th>Read</th><th>Published</th><th>Status</th></tr></thead><tbody>
+          {pg.slice.map((g) => (
+            <tr key={String(g.id)}><td><Link to={`/knowledge/${g.slug}`}><strong>{String(g.title)}</strong></Link><div className="muted" style={{ fontSize: 13 }}>{String(g.summary ?? "")}</div></td><td>{String(g.read_minutes ?? "—")} min</td><td>{fmtDate(g.created_at)}</td><td><span className="pill p-active">Live</span></td></tr>
+          ))}
+        </tbody></table></div>
+      )}
+      {pg.pages > 1 && <div className="pager"><span>Showing {pg.slice.length} of {pg.total}</span><nav>{Array.from({ length: pg.pages }, (_, i) => i + 1).map((p) => <button key={p} className={`pagebtn${p === pg.cur ? " cur" : ""}`} onClick={() => pg.setPage(p)}>{p}</button>)}</nav></div>}
+    </div>
+  );
 }
 
 function KnowledgeDetail() {
@@ -221,7 +354,22 @@ function KnowledgeDetail() {
   const { data, error, loading } = useApi<{ item: Item }>(slug ? `/api/knowledge/${slug}` : null);
   if (loading) return <p className="muted">Opening the guide…</p>;
   if (error || !data) return <div className="notice">That guide is missing or awaiting review. <Link to="/knowledge">Back to guides</Link></div>;
-  return <article className="reveal" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 32 }}><div><h1 className="display">{data.item.title}</h1><p className="lede">{data.item.summary}</p><pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{data.item.body_md}</pre></div><aside><div className="notice"><strong>About this guide</strong><p className="muted">{data.item.read_minutes} min read · free to reuse with credit.</p></div></aside></article>;
+  return (
+    <div className="reveal">
+      <div className="page-head"><div><h1 className="display">{String(data.item.title)}</h1><p>{String(data.item.summary)}</p></div><div className="head-actions"><Link className="btn" to="/knowledge">All guides</Link></div></div>
+      <div className="detail-grid">
+        <div className="card"><pre className="prose-body">{String(data.item.body_md)}</pre></div>
+        <aside className="inspector">
+          <div className="inspector-head"><strong>About this guide</strong><div className="muted" style={{ fontSize: 13 }}>Free to reuse with credit.</div></div>
+          <div className="inspector-body">
+            <div className="field"><label>Reading time</label><div>{String(data.item.read_minutes)} min</div></div>
+            <div className="field"><label>Published</label><div>{fmtDate(data.item.created_at)}</div></div>
+            <div className="field"><label>Status</label><div><span className="pill p-active">Live</span></div></div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
 }
 
 function Submit({ me }: { me: ReturnType<typeof useMe> }) {
@@ -235,18 +383,19 @@ function Submit({ me }: { me: ReturnType<typeof useMe> }) {
     if (status === 201) e.currentTarget.reset();
   }
   return (
-    <div className="reveal">
-      <h1 className="display">Share something free.</h1>
-      <p className="lede">Guides go live after a quick human review.</p>
+    <div className="reveal" style={{ maxWidth: 720 }}>
+      <div className="page-head"><div><h1 className="display">Share something free.</h1><p>Guides go live after a quick human review.</p></div></div>
       <SignInGate user={me.user} loading={me.loading}>
-        {msg && <p role="status">{msg}</p>}
-        <form onSubmit={(e) => void send(e)}>
-          <label>Title<input name="title" placeholder="A clear, plain title" required /></label>
-          <label>Summary<textarea name="summary" placeholder="One or two sentences on what it gives" /></label>
-          <label>Body<textarea name="body" rows={8} placeholder="Write the guide in plain words" /></label>
-          <Turnstile onToken={setToken} />
-          <button className="btn btn-primary" type="submit">Send for review</button>
-        </form>
+        <div className="card">
+          {msg && <p role="status">{msg}</p>}
+          <form onSubmit={(e) => void send(e)}>
+            <div className="field"><label>Title</label><input name="title" placeholder="A clear, plain title" required /></div>
+            <div className="field" style={{ marginTop: 12 }}><label>Summary</label><textarea name="summary" placeholder="One or two sentences on what it gives" /></div>
+            <div className="field" style={{ marginTop: 12 }}><label>Body</label><textarea name="body" rows={8} placeholder="Write the guide in plain words" /></div>
+            <Turnstile onToken={setToken} />
+            <div style={{ marginTop: 12 }}><button className="btn btn-primary" type="submit">Send for review</button></div>
+          </form>
+        </div>
       </SignInGate>
     </div>
   );
@@ -265,6 +414,11 @@ function SoftwareList({ me }: { me: ReturnType<typeof useMe> }) {
   const { data, loading, error } = useApi<{ items: Item[] }>("/api/software");
   const [msg, setMsg] = useState("");
   const [token, setToken] = useState("");
+  const [fq, setFq] = useState("");
+  const [fos, setFos] = useState("all");
+  const items = (data?.items ?? []).filter((s) =>
+    (!fq || String(s.title).toLowerCase().includes(fq.toLowerCase())) && (fos === "all" || String(s.os) === fos || String(s.os) === "multi"));
+  const pg = usePager(items);
   async function list(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
@@ -280,25 +434,43 @@ function SoftwareList({ me }: { me: ReturnType<typeof useMe> }) {
   }
   return (
     <div className="reveal">
-      <h1 className="display">Free software.</h1>
-      {(loading && <p className="muted">Loading software…</p>) || null}
+      <div className="page-head"><div><h1 className="display">Software.</h1><p>Versioned free downloads with checksums on request.</p></div></div>
+      <div className="stat-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+        <Stat label="Entries live" value={String(data?.items.length ?? 0)} loading={loading} />
+        <Stat label="With binary" value={String((data?.items ?? []).filter((s) => s.version).length)} loading={loading} />
+      </div>
+      <div className="filters">
+        <input type="search" placeholder="Search software…" value={fq} onChange={(e) => setFq(e.target.value)} aria-label="Search software" />
+        <select value={fos} onChange={(e) => setFos(e.target.value)} aria-label="Filter by platform">
+          <option value="all">All platforms</option><option value="windows">Windows</option><option value="mac">Mac</option><option value="linux">Linux</option><option value="android">Android</option><option value="web">Web</option><option value="multi">Multi</option>
+        </select>
+      </div>
       {error && <div className="notice">Software list failed ({error}).</div>}
-      {data && !data.items.length && <div className="notice"><strong>No software yet.</strong><p>Publish a free tool and it appears here after review.</p></div>}
-      {data?.items.map((s) => (
-        <div key={String(s.id)} className="list-row"><div><strong>{s.title}</strong> <span className="muted">{String(s.os)} · {String(s.license)}</span><div className="muted">{s.summary}</div></div><div>{s.version ? <a href={`/api/software/${s.slug}/download`}>v{String(s.version)} ↓</a> : <span className="muted">awaiting binary</span>}</div></div>
-      ))}
-      <h2 style={{ marginTop: 32 }}>List a free tool</h2>
+      {!loading && !items.length && <div className="notice"><strong>{fq || fos !== "all" ? "Nothing matches those filters." : "No software yet."}</strong><p>Publish a free tool below — it appears after review.</p></div>}
+      {!!items.length && (
+        <div className="table-wrap"><table className="tbl"><thead><tr><th>Name</th><th>Platform</th><th>License</th><th>Version</th><th></th></tr></thead><tbody>
+          {pg.slice.map((s) => (
+            <tr key={String(s.id)}><td><strong>{String(s.title)}</strong><div className="muted" style={{ fontSize: 13 }}>{String(s.summary ?? "")}</div></td><td>{String(s.os)}</td><td>{String(s.license)}</td><td>{s.version ? `v${s.version}` : <span className="pill p-draft">No binary</span>}</td><td>{s.version ? <a href={`/api/software/${s.slug}/download`}><strong>↓</strong></a> : ""}</td></tr>
+          ))}
+        </tbody></table></div>
+      )}
+      {pg.pages > 1 && <div className="pager"><span>Showing {pg.slice.length} of {pg.total}</span><nav>{Array.from({ length: pg.pages }, (_, i) => i + 1).map((p) => <button key={p} className={`pagebtn${p === pg.cur ? " cur" : ""}`} onClick={() => pg.setPage(p)}>{p}</button>)}</nav></div>}
+      <div className="sec-head"><h2>List a free tool</h2></div>
       <SignInGate user={me.user} loading={me.loading}>
-        {msg && <p role="status">{msg}</p>}
-        <form onSubmit={(e) => void list(e)}>
-          <label>Name<input name="title" placeholder="Tool name" required /></label>
-          <label>What it does<textarea name="summary" placeholder="One honest sentence" /></label>
-          <label>Platform<select name="os" defaultValue="multi"><option value="windows">Windows</option><option value="mac">Mac</option><option value="linux">Linux</option><option value="android">Android</option><option value="web">Web</option><option value="multi">Multi</option></select></label>
-          <label>Version<input name="version" placeholder="1.0" /></label>
-          <label>Binary (up to 25 MB)<input name="binary" type="file" /></label>
-          <Turnstile onToken={setToken} />
-          <button className="btn btn-primary" type="submit">Send for review</button>
-        </form>
+        <div className="card">
+          {msg && <p role="status">{msg}</p>}
+          <form onSubmit={(e) => void list(e)}>
+            <div className="field"><label>Name</label><input name="title" placeholder="Tool name" required /></div>
+            <div className="field" style={{ marginTop: 12 }}><label>What it does</label><textarea name="summary" placeholder="One honest sentence" /></div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+              <div className="field"><label>Platform</label><select name="os" defaultValue="multi"><option value="windows">Windows</option><option value="mac">Mac</option><option value="linux">Linux</option><option value="android">Android</option><option value="web">Web</option><option value="multi">Multi</option></select></div>
+              <div className="field"><label>Version</label><input name="version" placeholder="1.0" /></div>
+            </div>
+            <div className="field" style={{ marginTop: 12 }}><label>Binary (up to 25 MB)</label><input name="binary" type="file" /></div>
+            <Turnstile onToken={setToken} />
+            <div style={{ marginTop: 12 }}><button className="btn btn-primary" type="submit">Send for review</button></div>
+          </form>
+        </div>
       </SignInGate>
     </div>
   );
@@ -308,6 +480,9 @@ function FilesList({ me }: { me: ReturnType<typeof useMe> }) {
   const { data, loading, error } = useApi<{ items: Item[] }>("/api/files");
   const [msg, setMsg] = useState("");
   const [token, setToken] = useState("");
+  const [fq, setFq] = useState("");
+  const items = (data?.items ?? []).filter((f) => !fq || String(f.title).toLowerCase().includes(fq.toLowerCase()));
+  const pg = usePager(items);
   async function add(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
@@ -322,24 +497,31 @@ function FilesList({ me }: { me: ReturnType<typeof useMe> }) {
   }
   return (
     <div className="reveal">
-      <h1 className="display">The file library.</h1>
-      {loading && <p className="muted">Loading the library…</p>}
+      <div className="page-head"><div><h1 className="display">File library.</h1><p>Documents, datasets and templates — a reusable ledger.</p></div></div>
+      <div className="stat-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+        <Stat label="Files live" value={String(data?.items.length ?? 0)} loading={loading} />
+        <Stat label="Total bytes" value={String((data?.items ?? []).reduce((n, f) => n + Number(f.size_bytes ?? 0), 0))} loading={loading} />
+      </div>
+      <div className="filters"><input type="search" placeholder="Search files…" value={fq} onChange={(e) => setFq(e.target.value)} aria-label="Search files" /></div>
       {error && <div className="notice">Library failed ({error}).</div>}
-      {data && !data.items.length && <div className="notice"><strong>The shelves are empty.</strong><p>Upload a PDF, dataset or template below to start the library.</p></div>}
-      {!!data?.items.length && (
-        <table className="table"><thead><tr><th>Name</th><th>Type</th><th>Size</th><th>License</th><th></th></tr></thead><tbody>
-          {data?.items.map((f) => <tr key={String(f.id)}><td>{f.title}</td><td className="muted">{f.kind}</td><td className="muted">{f.size_bytes}</td><td className="muted">{f.license}</td><td><a href={`/api/files/${f.id}/download`}>Download</a></td></tr>)}
-        </tbody></table>
+      {!loading && !items.length && <div className="notice"><strong>{fq ? "No files match that search." : "The shelves are empty."}</strong><p>Upload a file below to start the library.</p></div>}
+      {!!items.length && (
+        <div className="table-wrap"><table className="tbl"><thead><tr><th>Name</th><th>Type</th><th>Size</th><th>License</th><th></th></tr></thead><tbody>
+          {pg.slice.map((f) => <tr key={String(f.id)}><td><strong>{String(f.title)}</strong></td><td className="muted">{String(f.kind)}</td><td className="muted">{String(f.size_bytes)}</td><td><span className="pill p-pending">{String(f.license)}</span></td><td><a href={`/api/files/${f.id}/download`}><strong>↓</strong></a></td></tr>)}
+        </tbody></table></div>
       )}
-      <h2 style={{ marginTop: 32 }}>Add a file</h2>
+      {pg.pages > 1 && <div className="pager"><span>Showing {pg.slice.length} of {pg.total}</span><nav>{Array.from({ length: pg.pages }, (_, i) => i + 1).map((p) => <button key={p} className={`pagebtn${p === pg.cur ? " cur" : ""}`} onClick={() => pg.setPage(p)}>{p}</button>)}</nav></div>}
+      <div className="sec-head"><h2>Add a file</h2></div>
       <SignInGate user={me.user} loading={me.loading}>
-        {msg && <p role="status">{msg}</p>}
-        <form onSubmit={(e) => void add(e)}>
-          <label>Title<input name="title" placeholder="What is this file?" required /></label>
-          <label>File (up to 25 MB)<input name="file" type="file" required /></label>
-          <Turnstile onToken={setToken} />
-          <button className="btn btn-primary" type="submit">Send for review</button>
-        </form>
+        <div className="card">
+          {msg && <p role="status">{msg}</p>}
+          <form onSubmit={(e) => void add(e)}>
+            <div className="field"><label>Title</label><input name="title" placeholder="What is this file?" required /></div>
+            <div className="field" style={{ marginTop: 12 }}><label>File (up to 25 MB)</label><input name="file" type="file" required /></div>
+            <Turnstile onToken={setToken} />
+            <div style={{ marginTop: 12 }}><button className="btn btn-primary" type="submit">Send for review</button></div>
+          </form>
+        </div>
       </SignInGate>
     </div>
   );
@@ -362,31 +544,42 @@ function ServicesList({ me }: { me: ReturnType<typeof useMe> }) {
     setMsg(String(d.message ?? d.error ?? ""));
     if (status === 201) e.currentTarget.reset();
   }
-  if (loading) return <p className="muted">Loading services…</p>;
   return (
-    <div>
-      <h1 className="display">Free help.</h1>
-      <div className="notice ribbon">Need → match → confirm. Tell us what you need; a volunteer confirms by your contact. No payment, ever.</div>
+    <div className="reveal">
+      <div className="page-head"><div><h1 className="display">Free help.</h1><p>Need → match → confirm. No payment, ever.</p></div></div>
+      {loading && <p className="muted">Loading services…</p>}
       {msg && <p role="status">{msg}</p>}
+      <div className="stat-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+        <Stat label="Offers live" value={String(data?.items.length ?? 0)} loading={loading} />
+        <Stat label="Open slots" value={String((data?.items ?? []).reduce((n, s) => n + Number(s.slots ?? 0), 0))} loading={loading} />
+      </div>
       {(data?.items ?? []).map((s) => (
-        <div key={String(s.id)} className="hub-card" style={{ marginTop: 12 }}><strong>{s.title}</strong><div className="muted">{String(s.place)} · {String(s.slots)} slots</div>
-          <form onSubmit={(e) => { e.preventDefault(); void request(String(s.id), e.currentTarget); }} style={{ marginTop: 12 }}>
-            <label>Your Name<input name="name" placeholder="Your Name" required /></label>
-            <label>Contact<input name="contact" placeholder="you@example.com or phone" required /></label>
-            <label>What do you need?<textarea name="note" placeholder="A sentence about your situation" /></label>
-            <Turnstile onToken={setToken} />
-            <button className="btn btn-primary" type="submit">Request this help</button>
-          </form></div>
+        <div className="card" key={String(s.id)}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div><strong>{String(s.title)}</strong><div className="muted" style={{ fontSize: 13 }}>{String(s.place)} · {String(s.slots)} slots</div></div>
+            <span className="pill p-active">Open</span>
+          </div>
+          <form onSubmit={(e) => { e.preventDefault(); void request(String(s.id), e.currentTarget); }} style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div className="field"><label>Your name</label><input name="name" placeholder="Your Name" required /></div>
+            <div className="field"><label>Contact</label><input name="contact" placeholder="you@example.com or phone" required /></div>
+            <div className="field" style={{ gridColumn: "1 / -1" }}><label>What do you need?</label><textarea name="note" placeholder="A sentence about your situation" /></div>
+            <div style={{ gridColumn: "1 / -1" }}><Turnstile onToken={setToken} /><button className="btn btn-primary" type="submit">Request this help</button></div>
+          </form>
+        </div>
       ))}
-      {!data?.items.length && <div className="notice" style={{ marginTop: 12 }}><strong>No offers right now.</strong><p>Check back soon, or offer a skill yourself.</p></div>}
-      <h2 style={{ marginTop: 32 }}>Offer help</h2>
+      {!loading && !data?.items.length && <div className="notice"><strong>No offers right now.</strong><p>Check back soon, or offer a skill yourself below.</p></div>}
+      <div className="sec-head"><h2>Offer help</h2></div>
       <SignInGate user={me.user} loading={me.loading}>
-        <form onSubmit={(e) => void offer(e)}>
-          <label>What help?<input name="title" placeholder="e.g. Weekend tutoring, bike repairs" required /></label>
-          <label>Where?<input name="place" placeholder="remote or a place" /></label>
-          <label>How many people?<input name="slots" type="number" min={1} defaultValue={1} /></label>
-          <button className="btn btn-primary" type="submit">Offer for review</button>
-        </form>
+        <div className="card">
+          <form onSubmit={(e) => void offer(e)}>
+            <div className="field"><label>What help?</label><input name="title" placeholder="e.g. Weekend tutoring, bike repairs" required /></div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+              <div className="field"><label>Where?</label><input name="place" placeholder="remote or a place" /></div>
+              <div className="field"><label>How many people?</label><input name="slots" type="number" min={1} defaultValue={1} /></div>
+            </div>
+            <div style={{ marginTop: 12 }}><button className="btn btn-primary" type="submit">Offer for review</button></div>
+          </form>
+        </div>
       </SignInGate>
     </div>
   );
@@ -418,34 +611,41 @@ function SocialList({ me }: { me: ReturnType<typeof useMe> }) {
     setMsg(String(d.message ?? d.error ?? ""));
     if (status === 201) e.currentTarget.reset();
   }
-  if (loading) return <p className="muted">Loading gatherings…</p>;
+  const events = data?.items ?? [];
   return (
-    <div>
-      <h1 className="display">Gatherings.</h1>
-      {present != null && <p className="muted" role="status">{present} neighbours browsing now.</p>}
+    <div className="reveal">
+      <div className="page-head"><div><h1 className="display">Gatherings.</h1><p>{present != null ? `${present} neighbours browsing now.` : "Volunteer meetups and shared work."}</p></div></div>
+      {loading && <p className="muted">Loading gatherings…</p>}
       {msg && <p role="status">{msg}</p>}
-      {(data?.items ?? []).map((e) => (
-        <div key={String(e.id)} className="hub-card" style={{ marginTop: 12 }}>
-          <small>{new Date(Number(e.starts_at) * 1000).toLocaleString()} · {String(e.place)}</small>
-          <h3 style={{ margin: "6px 0" }}>{e.title}</h3>
-          <form onSubmit={(ev) => { ev.preventDefault(); void rsvp(String(e.id), ev.currentTarget); }} style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-            <input name="name" placeholder="Your Name" required style={{ flex: "1 1 160px" }} />
-            <input name="contact" placeholder="Contact (optional)" style={{ flex: "1 1 160px" }} />
-            <button className="btn" type="submit">Join</button>
+      <div className="stat-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+        <Stat label="Gatherings upcoming" value={String(events.length)} loading={loading} />
+        <Stat label="Total capacity" value={String(events.reduce((n, v) => n + Number(v.capacity ?? 0), 0))} loading={loading} />
+      </div>
+      {!!events.length && (
+        <div className="table-wrap"><table className="tbl"><thead><tr><th>Gathering</th><th>Place</th><th>Date</th><th></th></tr></thead><tbody>
+          {events.map((v) => (
+            <tr key={String(v.id)}>
+              <td><strong>{String(v.title)}</strong></td><td>{String(v.place)}</td><td>{fmtDate(v.starts_at)}</td>
+              <td><form onSubmit={(ev) => { ev.preventDefault(); void rsvp(String(v.id), ev.currentTarget); }} style={{ display: "flex", gap: 6 }}><input name="name" placeholder="Your Name" required aria-label="Your name" style={{ width: 130 }} /><button className="btn btn-sm" type="submit">Join</button></form></td>
+            </tr>
+          ))}
+        </tbody></table></div>
+      )}
+      {!loading && !events.length && <div className="notice"><strong>Nothing scheduled.</strong><p>Propose a cleanup, study circle or repair café below.</p></div>}
+      <div className="sec-head"><h2>Propose a gathering</h2></div>
+      <SignInGate user={me.user} loading={me.loading}>
+        <div className="card">
+          <form onSubmit={(e) => void propose(e)}>
+            <div className="field"><label>Title</label><input name="title" placeholder="e.g. Riverside cleanup morning" required /></div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 12 }}>
+              <div className="field"><label>Where?</label><input name="place" placeholder="A place or remote" /></div>
+              <div className="field"><label>When?</label><input name="when" type="datetime-local" required /></div>
+              <div className="field"><label>Capacity</label><input name="capacity" type="number" min={1} defaultValue={20} /></div>
+            </div>
+            <Turnstile onToken={setToken} />
+            <div style={{ marginTop: 12 }}><button className="btn btn-primary" type="submit">Propose for review</button></div>
           </form>
         </div>
-      ))}
-      {!data?.items.length && <div className="notice"><strong>Nothing scheduled.</strong><p>Propose a cleanup, study circle or repair café below.</p></div>}
-      <h2 style={{ marginTop: 32 }}>Propose a gathering</h2>
-      <SignInGate user={me.user} loading={me.loading}>
-        <form onSubmit={(e) => void propose(e)}>
-          <label>Title<input name="title" placeholder="e.g. Riverside cleanup morning" required /></label>
-          <label>Where?<input name="place" placeholder="A place or remote" /></label>
-          <label>When?<input name="when" type="datetime-local" required /></label>
-          <label>Capacity<input name="capacity" type="number" min={1} defaultValue={20} /></label>
-          <Turnstile onToken={setToken} />
-          <button className="btn btn-primary" type="submit">Propose for review</button>
-        </form>
       </SignInGate>
     </div>
   );
@@ -461,29 +661,28 @@ function Moderate({ me }: { me: ReturnType<typeof useMe> }) {
     setTick((t) => t + 1);
   }
   if (me.loading || loading) return <p className="muted">Loading the review queue…</p>;
-  if (!me.user) return <div className="notice"><strong>Sign in first.</strong></div>;
-  if (error) return <div className="notice"><strong>Moderators only.</strong><p>{ ["admin", "moderator"].includes(me.user.role) ? error : "Your account is not a moderator account."}</p></div>;
+  if (!me.user) return <div className="notice"><strong>Sign in first.</strong><p><Link to="/signin">Sign in</Link> to review the queue.</p></div>;
+  if (error) return <div className="notice"><strong>Moderators only.</strong><p>{["admin", "moderator"].includes(me.user.role) ? error : "Your account is not a moderator account."}</p></div>;
   const kinds = Object.entries(data?.pending ?? {});
   const total = kinds.reduce((n, [, v]) => n + v.length, 0);
   return (
     <div className="reveal">
-      <h1 className="display">Review queue.</h1>
-      <p className="lede">{total === 0 ? "All clear — nothing waiting." : `${total} items waiting for a human decision.`}</p>
+      <div className="page-head"><div><h1 className="display">Review queue.</h1><p>{total === 0 ? "All clear — nothing waiting." : `${total} items waiting for a human decision.`}</p></div></div>
       {msg && <p role="status">{msg}</p>}
-      {kinds.map(([table, items]) => items.map((it) => {
-        const kind = table === "knowledge_posts" ? "knowledge" : table === "software_items" ? "software" : table === "library_files" ? "files" : table === "services" ? "services" : "events";
-        return (
-          <div key={String(it.id)} className="hub-card" style={{ marginTop: 12 }}>
-            <small className="muted">{kind}</small>
-            <h3 style={{ margin: "6px 0" }}>{String(it.title)}</h3>
-            <p className="muted">{String(it.summary ?? it.place ?? it.body_md ?? "").slice(0, 300)}</p>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn btn-primary" onClick={() => void decide(kind, String(it.id), true)}>Approve</button>
-              <button className="btn" onClick={() => void decide(kind, String(it.id), false)}>Reject</button>
-            </div>
-          </div>
-        );
-      }))}
+      {!!total && (
+        <div className="table-wrap"><table className="tbl"><thead><tr><th>Item</th><th>Hub</th><th>Submitted</th><th></th></tr></thead><tbody>
+          {kinds.flatMap(([table, items]) => items.map((it) => {
+            const kind = table === "knowledge_posts" ? "knowledge" : table === "software_items" ? "software" : table === "library_files" ? "files" : table === "services" ? "services" : "events";
+            return (
+              <tr key={String(it.id)}>
+                <td><strong>{String(it.title)}</strong><div className="muted" style={{ fontSize: 13 }}>{String(it.summary ?? it.place ?? it.body_md ?? "").slice(0, 120)}</div></td>
+                <td><span className="pill p-pending">{kind}</span></td><td>{fmtDate(it.created_at)}</td>
+                <td><div className="row-actions"><button className="btn btn-sm btn-primary" onClick={() => void decide(kind, String(it.id), true)}>Approve</button><button className="btn btn-sm" onClick={() => void decide(kind, String(it.id), false)}>Reject</button></div></td>
+              </tr>
+            );
+          }))}
+        </tbody></table></div>
+      )}
     </div>
   );
 }
@@ -491,7 +690,7 @@ function Moderate({ me }: { me: ReturnType<typeof useMe> }) {
 export default function App() {
   const me = useMe();
   return <Shell me={me}><Routes>
-    <Route path="/" element={<Home />} />
+    <Route path="/" element={<Dashboard />} />
     <Route path="/signin" element={<SignIn me={me} />} />
     <Route path="/search" element={<SearchPage />} />
     <Route path="/knowledge" element={<KnowledgeList />} />
