@@ -1,0 +1,36 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "hitaisi",
+  "main": "dist/worker.js",
+  "compatibility_date": "2026-10-16",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "assets": { "directory": "./dist/web" },
+  "vars": { "ENVIRONMENT": "development", "SITE_NAME": "Hitaisi", "TURNSTILE_SITE_KEY": "" },
+  "kv_namespaces": [{ "binding": "CACHE", "id": "06a38b184c164d5b9c785d96b9dfa0da" }],
+  "r2_buckets": [
+    { "binding": "MEDIA", "bucket_name": "benevolent-media" },
+    { "binding": "DOWNLOADS", "bucket_name": "benevolent-downloads" }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "benevolent-db",
+      "database_id": "db536d75-29c5-47ff-8088-62f7156b2f5b",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "queues": {
+    "producers": [{ "binding": "MODERATION_QUEUE", "queue": "moderation" }],
+    "consumers": [{ "queue": "moderation", "max_batch_size": 10, "max_batch_timeout": 30 }]
+  },
+  "vectorize": [{ "binding": "SEARCH_INDEX", "index_name": "benevolent-search" }],
+  "ai": { "binding": "AI" },
+  "send_email": [{ "name": "EMAIL" }],
+  "durable_objects": { "bindings": [{ "name": "SOCIAL_ROOM", "class_name": "SocialRoom" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SocialRoom"] }],
+  "env": {
+    "staging": { "name": "hitaisi-staging", "vars": { "ENVIRONMENT": "staging" } },
+    "production": { "name": "hitaisi", "vars": { "ENVIRONMENT": "production" } }
+  }
+}
