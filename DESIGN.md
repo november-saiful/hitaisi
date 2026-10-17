@@ -35,9 +35,10 @@ Job of the homepage: show what was freely given this week, and where to give.
 - No bento mosaic, no fake terminal, no logo bar, no invented stats (R-05, C-3).
 
 ## Motion dial: 2 (purposeful reveals + hover micro-interactions, no loops)
-- Entry: fade-up 24px + de-blur 600ms `cubic-bezier(0.32,0.72,0,1)`, `whileInView` once.
-- Hover: CTA inner icon translates diagonally; cards lift 2px max.
-- No endless pulse/float/spin (R-19). `prefers-reduced-motion` disables all.
+- Entry: fade-up 8px + de-blur 2px, 240ms `cubic-bezier(0.23,1,0.32,1)`, once per route. Stagger 40ms cascade on stat groups only — decorative, never blocks input.
+- Press: every pressable scales to 0.97 in 160ms ease-out (`:active`); release snaps back. Hover lift (1-2px) gated behind `@media (hover:hover) and (pointer:fine)`.
+- Curves: `--ease-out` for enter/feedback, `--ease-in-out` for on-screen morphs, `--ease-drawer` for the sidebar (320ms). Never `ease-in`, never `transition: all`, never `scale(0)` — enter from `translateY(8px)` + `opacity:0` + `blur(2px)`.
+- Only `transform` + `opacity` (+ `filter: blur` as bridge) animate; rows crossfade `background-color` 150ms. No endless pulse/float/spin (R-19). `prefers-reduced-motion` keeps opacity fades, drops all displacement.
 
 ## Signature: the Giving Ribbon + inspector panels
 One continuous 2px black thread marks real state per hub; detail views pair

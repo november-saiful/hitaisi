@@ -156,7 +156,7 @@ function Sidebar({ me, open, close }: { me: ReturnType<typeof useMe>; open: bool
         <nav>
           {(recent?.items ?? []).slice(0, 4).map((g) => (
             <Link key={String(g.id)} className="run-row" to={`/knowledge/${g.slug}`} onClick={close}>
-              <span className="run-dot live" /><span className="grow" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(g.title)}</span>
+              <span className="grow" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(g.title)}</span>
             </Link>
           ))}
           {(!recent?.items?.length) && <span className="run-row muted">No guides yet.</span>}
@@ -218,8 +218,8 @@ function Shell({ me, children }: { me: ReturnType<typeof useMe>; children: React
               <kbd>↵</kbd>
             </form>
             <button className="iconbtn" onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))} aria-label="Toggle theme">{theme === "light" ? "◐" : "◑"}</button>
-            {me.user ? <button className="btn btn-sm" onClick={() => void logout()}><span className="btn-text">Sign out</span><span>↩</span></button>
-              : <Link className="btn btn-sm btn-primary" to="/signin"><span className="btn-text">Sign in</span><span>→</span></Link>}
+            {me.user ? <button className="btn btn-sm" onClick={() => void logout()}><span className="btn-text">Sign out</span></button>
+              : <Link className="btn btn-sm btn-primary" to="/signin"><span className="btn-text">Sign in</span></Link>}
           </div>
         </header>
         <main className="page">{children}</main>
@@ -246,7 +246,7 @@ function Dashboard() {
         <div><h1 className="display">What was freely given.</h1><p>Guides, software, files, help and gatherings — read everything, share after review.</p></div>
         <div className="head-actions"><Link className="btn" to="/social">Join a gathering</Link><Link className="btn btn-primary" to="/submit">Share something</Link></div>
       </div>
-      <div className="stat-grid">
+      <div className="stat-grid stagger">
         <Stat label="Guides live" value={String(guides.length)} loading={k.loading} />
         <Stat label="Software entries" value={String(s.data?.items.length ?? 0)} loading={s.loading} />
         <Stat label="Files in library" value={String(f.data?.items.length ?? 0)} loading={f.loading} />
@@ -330,7 +330,7 @@ function KnowledgeList() {
   return (
     <div className="reveal">
       <div className="page-head"><div><h1 className="display">Knowledge.</h1><p>Longform guides, free to read and reuse with credit.</p></div><div className="head-actions"><Link className="btn btn-primary" to="/submit">Write a guide</Link></div></div>
-      <div className="stat-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+      <div className="stat-grid stagger" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
         <Stat label="Guides live" value={String(data?.items.length ?? 0)} loading={loading} />
         <Stat label="Total reading time" value={`${(data?.items ?? []).reduce((n, g) => n + Number(g.read_minutes ?? 0), 0)} min`} loading={loading} />
       </div>
@@ -435,7 +435,7 @@ function SoftwareList({ me }: { me: ReturnType<typeof useMe> }) {
   return (
     <div className="reveal">
       <div className="page-head"><div><h1 className="display">Software.</h1><p>Versioned free downloads with checksums on request.</p></div></div>
-      <div className="stat-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+      <div className="stat-grid stagger" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
         <Stat label="Entries live" value={String(data?.items.length ?? 0)} loading={loading} />
         <Stat label="With binary" value={String((data?.items ?? []).filter((s) => s.version).length)} loading={loading} />
       </div>
@@ -450,7 +450,7 @@ function SoftwareList({ me }: { me: ReturnType<typeof useMe> }) {
       {!!items.length && (
         <div className="table-wrap"><table className="tbl"><thead><tr><th>Name</th><th>Platform</th><th>License</th><th>Version</th><th></th></tr></thead><tbody>
           {pg.slice.map((s) => (
-            <tr key={String(s.id)}><td><strong>{String(s.title)}</strong><div className="muted" style={{ fontSize: 13 }}>{String(s.summary ?? "")}</div></td><td>{String(s.os)}</td><td>{String(s.license)}</td><td>{s.version ? `v${s.version}` : <span className="pill p-draft">No binary</span>}</td><td>{s.version ? <a href={`/api/software/${s.slug}/download`}><strong>↓</strong></a> : ""}</td></tr>
+            <tr key={String(s.id)}><td><strong>{String(s.title)}</strong><div className="muted" style={{ fontSize: 13 }}>{String(s.summary ?? "")}</div></td><td>{String(s.os)}</td><td>{String(s.license)}</td><td>{s.version ? `v${s.version}` : <span className="pill p-draft">No binary</span>}</td><td>{s.version ? <a className="linkbtn" href={`/api/software/${s.slug}/download`}>Download</a> : ""}</td></tr>
           ))}
         </tbody></table></div>
       )}
@@ -498,7 +498,7 @@ function FilesList({ me }: { me: ReturnType<typeof useMe> }) {
   return (
     <div className="reveal">
       <div className="page-head"><div><h1 className="display">File library.</h1><p>Documents, datasets and templates — a reusable ledger.</p></div></div>
-      <div className="stat-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+      <div className="stat-grid stagger" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
         <Stat label="Files live" value={String(data?.items.length ?? 0)} loading={loading} />
         <Stat label="Total bytes" value={String((data?.items ?? []).reduce((n, f) => n + Number(f.size_bytes ?? 0), 0))} loading={loading} />
       </div>
@@ -507,7 +507,7 @@ function FilesList({ me }: { me: ReturnType<typeof useMe> }) {
       {!loading && !items.length && <div className="notice"><strong>{fq ? "No files match that search." : "The shelves are empty."}</strong><p>Upload a file below to start the library.</p></div>}
       {!!items.length && (
         <div className="table-wrap"><table className="tbl"><thead><tr><th>Name</th><th>Type</th><th>Size</th><th>License</th><th></th></tr></thead><tbody>
-          {pg.slice.map((f) => <tr key={String(f.id)}><td><strong>{String(f.title)}</strong></td><td className="muted">{String(f.kind)}</td><td className="muted">{String(f.size_bytes)}</td><td><span className="pill p-pending">{String(f.license)}</span></td><td><a href={`/api/files/${f.id}/download`}><strong>↓</strong></a></td></tr>)}
+          {pg.slice.map((f) => <tr key={String(f.id)}><td><strong>{String(f.title)}</strong></td><td className="muted">{String(f.kind)}</td><td className="muted">{String(f.size_bytes)}</td><td><span className="pill p-pending">{String(f.license)}</span></td><td><a className="linkbtn" href={`/api/files/${f.id}/download`}>Download</a></td></tr>)}
         </tbody></table></div>
       )}
       {pg.pages > 1 && <div className="pager"><span>Showing {pg.slice.length} of {pg.total}</span><nav>{Array.from({ length: pg.pages }, (_, i) => i + 1).map((p) => <button key={p} className={`pagebtn${p === pg.cur ? " cur" : ""}`} onClick={() => pg.setPage(p)}>{p}</button>)}</nav></div>}
@@ -549,12 +549,12 @@ function ServicesList({ me }: { me: ReturnType<typeof useMe> }) {
       <div className="page-head"><div><h1 className="display">Free help.</h1><p>Need → match → confirm. No payment, ever.</p></div></div>
       {loading && <p className="muted">Loading services…</p>}
       {msg && <p role="status">{msg}</p>}
-      <div className="stat-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+      <div className="stat-grid stagger" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
         <Stat label="Offers live" value={String(data?.items.length ?? 0)} loading={loading} />
         <Stat label="Open slots" value={String((data?.items ?? []).reduce((n, s) => n + Number(s.slots ?? 0), 0))} loading={loading} />
       </div>
       {(data?.items ?? []).map((s) => (
-        <div className="card" key={String(s.id)}>
+        <div className="card card-lift" key={String(s.id)}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
             <div><strong>{String(s.title)}</strong><div className="muted" style={{ fontSize: 13 }}>{String(s.place)} · {String(s.slots)} slots</div></div>
             <span className="pill p-active">Open</span>
@@ -617,7 +617,7 @@ function SocialList({ me }: { me: ReturnType<typeof useMe> }) {
       <div className="page-head"><div><h1 className="display">Gatherings.</h1><p>{present != null ? `${present} neighbours browsing now.` : "Volunteer meetups and shared work."}</p></div></div>
       {loading && <p className="muted">Loading gatherings…</p>}
       {msg && <p role="status">{msg}</p>}
-      <div className="stat-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+      <div className="stat-grid stagger" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
         <Stat label="Gatherings upcoming" value={String(events.length)} loading={loading} />
         <Stat label="Total capacity" value={String(events.reduce((n, v) => n + Number(v.capacity ?? 0), 0))} loading={loading} />
       </div>
